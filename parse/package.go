@@ -45,6 +45,10 @@ type Package struct {
 	// HasFailedBuildOrSetup marks the package as having a failed build or setup.
 	// Example: [build failed] or [setup failed]
 	HasFailedBuildOrSetup bool
+
+	// index memoizes test lookups by name. Long streams carry many events per
+	// test, and scanning Tests for every event dominates the parse time.
+	index map[string]*Test
 }
 
 // newPackage initializes and returns a Package.
@@ -65,6 +69,7 @@ func (p *Package) AddEvent(event *Event) {
 			Package: event.Package,
 		}
 		p.Tests = append(p.Tests, t)
+		p.index[event.Test] = t
 	}
 
 	t.Events = append(t.Events, event)
@@ -72,13 +77,19 @@ func (p *Package) AddEvent(event *Event) {
 
 // GetTest returns a test based on given name, if no test is found
 // return nil
+//
+// Lookups are served from an index built once from the Tests slice, so
+// repeated lookups for the same name do not rescan the slice.
 func (p *Package) GetTest(name string) *Test {
-	for _, t := range p.Tests {
-		if t.Name == name {
-			return t
+	if p.index == nil {
+		p.index = make(map[string]*Test, len(p.Tests))
+		for _, t := range p.Tests {
+			if _, ok := p.index[t.Name]; !ok {
+				p.index[t.Name] = t
+			}
 		}
 	}
-	return nil
+	return p.index[name]
 }
 
 // TestsByAction returns all tests that identify as one of the following
@@ -93,4 +104,39 @@ func (p *Package) TestsByAction(action Action) []*Test {
 		}
 	}
 	return tests
+}
+
+// noteSpecialOutput parses the raw output to add additional metadata to the
+// package: data races, cached results, missing tests and coverage.
+func (p *Package) noteSpecialOutput(e *Event) {
+	switch {
+	case e.IsRace():
+		p.HasDataRace = true
+		if e.Test != "" {
+			p.DataRaceTests = append(p.DataRaceTests, e.Test)
+		}
+	case e.IsCached():
+		p.Cached = true
+	case e.NoTestFiles():
+		p.NoTestFiles = true
+		// Manually mark [no test files] as "pass", because the go test tool reports the
+		// package Summary action as "skip".
+		// TODO(mf): revisit this behavior?
+		p.Summary.Package = e.Package
+		p.Summary.Action = ActionPass
+	case e.NoTestsWarn():
+		// One or more tests within the package contains no tests.
+		p.NoTestSlice = append(p.NoTestSlice, e)
+	case e.NoTestsToRun():
+		// Only packages marked as "pass" will contain a summary line appended with [no tests to run].
+		// This indicates one or more tests is marked as having no tests to run.
+		p.NoTests = true
+		p.Summary.Package = e.Package
+		p.Summary.Action = ActionPass
+	default:
+		if cover, ok := e.Cover(); ok {
+			p.Cover = true
+			p.Coverage = cover
+		}
+	}
 }

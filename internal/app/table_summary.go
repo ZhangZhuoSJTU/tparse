@@ -137,35 +137,7 @@ func (c *consoleWriter) summaryTable(
 		}
 		// TODO(mf): refactor this
 		// Separate cover colorization from the delta output.
-		coverage := "--"
-		if pkg.Cover {
-			coverage = fmt.Sprintf("%.1f%%", pkg.Coverage)
-			if against != nil {
-				againstP, ok := against.Packages[pkg.Summary.Package]
-				if ok {
-					var sign string
-					if pkg.Coverage > againstP.Coverage {
-						sign = "+"
-					}
-					coverage = fmt.Sprintf("%s (%s)", coverage, sign+strconv.FormatFloat(pkg.Coverage-againstP.Coverage, 'f', 1, 64)+"%")
-				} else {
-					coverage = fmt.Sprintf("%s (-)", coverage)
-				}
-			}
-			// Showing coverage for a package that failed is a bit odd.
-			//
-			// Only colorize the coverage when everything passed AND the output is not markdown.
-			if pkg.Summary.Action == parse.ActionPass && c.format != OutputFormatMarkdown {
-				switch cover := pkg.Coverage; {
-				case cover > 0.0 && cover <= 50.0:
-					coverage = c.red(coverage)
-				case pkg.Coverage > 50.0 && pkg.Coverage < 80.0:
-					coverage = c.yellow(coverage)
-				case pkg.Coverage >= 80.0:
-					coverage = c.green(coverage)
-				}
-			}
-		}
+		coverage := c.coverageCell(pkg, against)
 
 		status := c.FormatAction(pkg.Summary.Action)
 
@@ -227,6 +199,42 @@ func (r summaryRow) toRow() []string {
 		r.fail,
 		r.skip,
 	}
+}
+
+// coverageCell renders the coverage column for a package, including the delta
+// against the comparison run when one is available.
+func (c *consoleWriter) coverageCell(pkg *parse.Package, against *parse.GoTestSummary) string {
+	coverage := "--"
+	if !pkg.Cover {
+		return coverage
+	}
+	coverage = fmt.Sprintf("%.1f%%", pkg.Coverage)
+	if against != nil {
+		againstP, ok := against.Packages[pkg.Summary.Package]
+		if ok {
+			var sign string
+			if pkg.Coverage > againstP.Coverage {
+				sign = "+"
+			}
+			coverage = fmt.Sprintf("%s (%s)", coverage, sign+strconv.FormatFloat(pkg.Coverage-againstP.Coverage, 'f', 1, 64)+"%")
+		} else {
+			coverage = fmt.Sprintf("%s (-)", coverage)
+		}
+	}
+	// Showing coverage for a package that failed is a bit odd.
+	//
+	// Only colorize the coverage when everything passed AND the output is not markdown.
+	if pkg.Summary.Action == parse.ActionPass && c.format != OutputFormatMarkdown {
+		switch cover := pkg.Coverage; {
+		case cover > 0.0 && cover <= 50.0:
+			coverage = c.red(coverage)
+		case pkg.Coverage > 50.0 && pkg.Coverage < 80.0:
+			coverage = c.yellow(coverage)
+		case pkg.Coverage >= 80.0:
+			coverage = c.green(coverage)
+		}
+	}
+	return coverage
 }
 
 func shortenPackageName(

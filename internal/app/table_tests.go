@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -213,23 +214,39 @@ func getTestsFromPackages(pkg *parse.Package, option TestTableOptions) *packageT
 	return tests
 }
 
+// shortenTestName returns the test name as-is. When trim is set and the name is
+// both longer than maxLength and made up of subtest levels, the name is split so
+// that every level sits on its own line.
 func shortenTestName(s string, trim bool, maxLength int) string {
 	var testName strings.Builder
 	testName.WriteString(s)
-	if trim && testName.Len() > maxLength && strings.Count(testName.String(), "/") > 0 {
-		testName.Reset()
-		ss := strings.Split(s, "/")
-		testName.WriteString(ss[0] + "\n")
-		for i, s := range ss[1:] {
-			testName.WriteString(" /")
-			for len(s) > maxLength {
-				testName.WriteString(s[:maxLength-2] + " …\n  ")
-				s = s[maxLength-2:]
+	if !trim || testName.Len() <= maxLength || !strings.Contains(testName.String(), "/") {
+		return testName.String()
+	}
+	testName.Reset()
+	segments := strings.Split(s, "/")
+	testName.WriteString(segments[0] + "\n")
+	for i, segment := range segments[1:] {
+		testName.WriteString(" /")
+		if len(segment) <= maxLength {
+			testName.WriteString(segment)
+		} else {
+			// Long levels are wrapped across lines of at most maxLength-2
+			// bytes, cutting on a rune boundary so that multi-byte characters
+			// are never split across a line break.
+			rest := segment
+			for len(rest) >= maxLength-2 {
+				cut := maxLength - 2
+				for cut > 0 && !utf8.RuneStart(rest[cut]) {
+					cut--
+				}
+				testName.WriteString(rest[:cut] + " …\n  ")
+				rest = rest[cut:]
 			}
-			testName.WriteString(s)
-			if i != len(ss[1:])-1 {
-				testName.WriteString("\n")
-			}
+			testName.WriteString(rest)
+		}
+		if i != len(segments[1:])-1 {
+			testName.WriteString("\n")
 		}
 	}
 	return testName.String()
