@@ -243,36 +243,7 @@ func (s *GoTestSummary) AddEvent(e *Event) {
 		return
 	}
 	// Parse the raw output to add additional metadata to Package.
-	switch {
-	case e.IsRace():
-		pkg.HasDataRace = true
-		if e.Test != "" {
-			pkg.DataRaceTests = append(pkg.DataRaceTests, e.Test)
-		}
-	case e.IsCached():
-		pkg.Cached = true
-	case e.NoTestFiles():
-		pkg.NoTestFiles = true
-		// Manually mark [no test files] as "pass", because the go test tool reports the
-		// package Summary action as "skip".
-		// TODO(mf): revisit this behavior?
-		pkg.Summary.Package = e.Package
-		pkg.Summary.Action = ActionPass
-	case e.NoTestsWarn():
-		// One or more tests within the package contains no tests.
-		pkg.NoTestSlice = append(pkg.NoTestSlice, e)
-	case e.NoTestsToRun():
-		// Only packages marked as "pass" will contain a summary line appended with [no tests to run].
-		// This indicates one or more tests is marked as having no tests to run.
-		pkg.NoTests = true
-		pkg.Summary.Package = e.Package
-		pkg.Summary.Action = ActionPass
-	default:
-		if cover, ok := e.Cover(); ok {
-			pkg.Cover = true
-			pkg.Coverage = cover
-		}
-	}
+	pkg.noteSpecialOutput(e)
 	// We captured all the necessary package-level information, if the event
 	// is output and does not have a test name, discard it.
 	if e.DiscardEmptyTestOutput() {
